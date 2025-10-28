@@ -1,5 +1,6 @@
 #include "../include/cpu_kmeans.h"
 #include <float.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -55,7 +56,7 @@ double kmeans_image_colors(const unsigned char *data, int n_pixels,
     }
     // Average to get the new centroids
     for (int k = 0; k < n_colors; k++) {
-      if (cluster_sizes[k] == 0) {
+      if (cluster_sizes[k] > 0) {
         for (int c = 0; c < n_channels; c++) {
           new_centroids[k * n_channels + c] /= cluster_sizes[k];
         }
@@ -76,8 +77,10 @@ double kmeans_image_colors(const unsigned char *data, int n_pixels,
 
     memcpy(centroids, new_centroids, n_colors * n_channels * sizeof(float));
 
-    if (centroid_shift < tolerance)
+    if (centroid_shift < tolerance) {
+      printf("Converged after %d iterations\n", iter + 1);
       break;
+    }
   }
 
   // Final assignment and calculate inertia

@@ -6,66 +6,11 @@
 #include <stdint.h>
 
 // Constants
-// old ones
-#define THREADS_PER_BLOCK 128
-#define MAX_PATH_LENGTH 1024
-#define SHARED_MEMORY_THRESHOLD 1024
-#define MAX_BLOCKS_SHARED 32
-
 #define COLOR_NUMBER 4
 #define S_ERROR "[ERROR]"
 #define S_WARNING "[WARNING]"
 #define MAX_ITER 200
 #define EPSILON 1e-4
-
-// Macros
-#define CHECK(call)                                                            \
-  {                                                                            \
-    const cudaError_t error = call;                                            \
-    if (error != cudaSuccess) {                                                \
-      fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);                   \
-      fprintf(stderr, "code: %d, reason: %s\n", error,                         \
-              cudaGetErrorString(error));                                      \
-    }                                                                          \
-  }
-
-#define CHECK_WITH_CODE(call, code)                                            \
-  {                                                                            \
-    const cudaError_t error = call;                                            \
-    if (error != cudaSuccess) {                                                \
-      fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);                   \
-      fprintf(stderr, "code: %d, reason: %s\n", error,                         \
-              cudaGetErrorString(error));                                      \
-      return code;                                                             \
-    }                                                                          \
-  }
-
-#define CUDA_CHECK_MALLOC_WITH_CODE(ptr, size, cleanup_code, error_code)       \
-  do {                                                                         \
-    cudaError_t err = cudaMalloc(&ptr, size);                                  \
-    if (err != cudaSuccess) {                                                  \
-      printf("CUDA malloc failed: %s\n", cudaGetErrorString(err));             \
-      cleanup_code;                                                            \
-      return error_code;                                                       \
-    }                                                                          \
-  } while (0)
-
-#define CUDA_CHECK_MALLOC(ptr, size, cleanup_code)                             \
-  CUDA_CHECK_MALLOC_WITH_CODE(ptr, size, cleanup_code, 0)
-
-#define CUDA_CHECK_MEMCPY_WITH_CODE(dst, src, size, kind, cleanup_code,        \
-                                    error_code)                                \
-  do {                                                                         \
-    cudaError_t err = cudaMemcpy(dst, src, size, kind);                        \
-    if (err != cudaSuccess) {                                                  \
-      printf("CUDA memcpy failed: %s\n", cudaGetErrorString(err));             \
-      cleanup_code;                                                            \
-      return error_code;                                                       \
-    }                                                                          \
-  } while (0)
-
-#define CUDA_CHECK_MEMCPY(dst, src, size, kind, cleanup_code)                  \
-  CUDA_CHECK_MEMCPY_WITH_CODE(dst, src, size, kind, cleanup_code, 0)
 
 // Data structs
 typedef struct {
@@ -77,11 +22,62 @@ typedef struct {
 } LoadedImage;
 
 // Functions
+/**
+ * is_valid_image: Validates if a file is a valid PNG or JPEG image
+ * @filename: Path to the image file to validate
+ *
+ * Checks the file's magic numbers to determine if it's
+ * a valid PNG or JPEG image. Does NOT rely on file extension.
+ *
+ * Returns: true if file is valid PNG or JPEG, false otherwise
+ */
 void print_help(const char *program_name);
+
+/**
+ * is_valid_image: Validates if a file is a valid PNG or JPEG image
+ * @filename: Path to the image file to validate
+ *
+ * Checks the file's magic numbers to determine if it's
+ * a valid PNG or JPEG image. Does NOT rely on file extension.
+ *
+ * Returns: true if file is valid PNG or JPEG, false otherwise
+ */
 bool is_valid_image(const char *filename);
+
+/**
+ * load_image: Loads an image file into memory
+ * @img: LoadedImage struct with only filename initialized
+ *
+ * Loads an image file and returns a pointer to the pixel data.
+ * The caller is responsible for freeing the returned data using
+ * stbi_image_free().
+ *
+ * Return: Pointer to unsigned char array containing pixel data, or NULL on
+ * failure
+ */
 unsigned char *load_image(char *dir, LoadedImage *img);
+
+/**
+ * cleanup: free all pointers used
+ * @centroids: array of centroids
+ * @labels: array of labels
+ * @img_data: data of an image, loaded with stbi_load()
+ */
 void cleanup(float *centroids, int *labels, unsigned char *img_data);
+
+/**
+ * dump_image: write a file with the image, as divided in clusters
+ * @centroids: values of the centroids (colors to assign)
+ * @labels: label for each pixel
+ */
 void dump_image(const float *centroids, const int *labels, LoadedImage *img);
+
+/**
+ * name_changer: Gives back a new name with "_clustered.png" at the end
+ * @filepath: original filepath
+ *
+ * Return: the new name, it's just a string, NULL if failed
+ */
 char *name_changer(const char *filepath);
 
 #endif // COLOR_SEGMENTATION_H
