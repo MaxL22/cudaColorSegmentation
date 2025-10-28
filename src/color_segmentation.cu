@@ -1,5 +1,6 @@
 #include "../include/color_segmentation.h"
 #include "../include/cpu_kmeans.h"
+#include "../include/gpu_kmeans.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -11,7 +12,7 @@
 
 int main(int argc, char *argv[]) {
   // Load the image
-  // Parameters should be: image path, color count, --cpu?
+  // Parameters should be: image path, color count, --cpu
 
   // Check number of parameters
   if (argc < 2 || argc > 4) {
@@ -74,14 +75,11 @@ int main(int argc, char *argv[]) {
   int *labels = (int *)malloc(n_pixels * sizeof(int));
 
   // Perform k-means clustering
-  // TODO: GPU stuff (duh)
   double inertia;
   if (use_gpu) {
-    fprintf(stderr, "%s Not yet implemented, falling back to cpu \n",
-            S_WARNING);
     inertia =
-        kmeans_image_colors(img->data, n_pixels, img->channels, num_colors,
-                            centroids, labels, MAX_ITER, EPSILON);
+        gpu_kmeans_image_colors(img->data, n_pixels, img->channels, num_colors,
+                                centroids, labels, MAX_ITER, EPSILON);
   } else {
     inertia =
         kmeans_image_colors(img->data, n_pixels, img->channels, num_colors,
@@ -213,19 +211,19 @@ bool is_valid_image(const char *filename) {
  * @program_name: name of the program, usually taken from argv
  */
 void print_help(const char *program_name) {
-  printf("Usage: %s <directory> [options]\n\n", program_name);
-  printf("Performs k-means clustering on colors in images.\n\n");
+  printf("Usage: %s <image path> [options]\n\n", program_name);
+  printf("Performs k-means clustering on the colors of a given image.\n\n");
   printf("Arguments:\n");
-  printf("  <directory>       Path to directory containing images\n\n");
+  printf("  <image path>       Path to the image (JPG or PNG)\n\n");
   printf("Options:\n");
   printf("  --cpu             Use CPU instead of GPU for computation\n");
   printf(
-      "  <num_colors>      Number of color clusters (2-255, default: %d)\n\n",
+      "  <num_colors>      Number of color clusters (1-255, default: %d)\n\n",
       COLOR_NUMBER);
   printf("Examples:\n");
   printf("  %s ./images\n", program_name);
-  printf("  %s ./images 16\n", program_name);
-  printf("  %s ./images --cpu 32\n", program_name);
+  printf("  %s ./images 4\n", program_name);
+  printf("  %s ./images 8 --cpu\n", program_name);
 }
 
 /**
