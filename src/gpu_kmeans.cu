@@ -108,7 +108,7 @@ __global__ void assign_clusters_shared_kernel(const float *pixels, int n_pixels,
     }
   }
 
-  // Find nearest centroid using shared memory
+  // Find nearest centroid
   float min_dist = FLT_MAX;
   int best_cluster = 0;
   for (int k = 0; k < n_colors; k++) {
@@ -146,10 +146,12 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
 
   int cluster = labels[idx];
 
-  // Atomically add to cluster sums and counts
-  for (int c = 0; c < n_channels; c++) {
-    atomicAdd(&cluster_sums[cluster * n_channels + c],
-              pixels[idx * n_channels + c]);
+// Atomically add to cluster sums and counts
+#pragma unroll
+  for (int c = 0; c < 4; c++) {
+    if (c < n_channels)
+      atomicAdd(&cluster_sums[cluster * n_channels + c],
+                pixels[idx * n_channels + c]);
   }
   atomicAdd(&cluster_counts[cluster], 1);
 }
@@ -176,15 +178,19 @@ __global__ void finalize_centroids_kernel(const float *cluster_sums,
     return;
 
   if (cluster_counts[k] > 0) {
-    // Average to get new centroid
-    for (int c = 0; c < n_channels; c++) {
-      new_centroids[k * n_channels + c] =
-          cluster_sums[k * n_channels + c] / cluster_counts[k];
+// Average to get new centroid
+#pragma unroll
+    for (int c = 0; c < 4; c++) {
+      if (c < n_channels)
+        new_centroids[k * n_channels + c] =
+            cluster_sums[k * n_channels + c] / cluster_counts[k];
     }
   } else {
-    // Keep old centroid for empty clusters
-    for (int c = 0; c < n_channels; c++) {
-      new_centroids[k * n_channels + c] = old_centroids[k * n_channels + c];
+// Keep old centroid for empty clusters
+#pragma unroll
+    for (int c = 0; c < 4; c++) {
+      if (c < n_channels)
+        new_centroids[k * n_channels + c] = old_centroids[k * n_channels + c];
     }
   }
 }
@@ -214,17 +220,20 @@ __global__ void calculate_inertia_kernel(const float *pixels, int n_pixels,
 
   if (idx < n_pixels) {
     int cluster = labels[idx];
-    for (int c = 0; c < n_channels; c++) {
-      double diff =
-          pixels[idx * n_channels + c] - centroids[cluster * n_channels + c];
-      local_inertia += diff * diff;
+#pragma unroll
+    for (int c = 0; c < 4; c++) {
+      if (c < n_channels) {
+        double diff =
+            pixels[idx * n_channels + c] - centroids[cluster * n_channels + c];
+        local_inertia += diff * diff;
+      }
     }
   }
 
   shared_inertia[tid] = local_inertia;
   __syncthreads();
 
-  // Reduction in shared memory
+  // Reduction shared memory
   for (int s = blockDim.x / 2; s > 0; s >>= 1) {
     if (tid < s) {
       shared_inertia[tid] += shared_inertia[tid + s];
@@ -377,9 +386,8 @@ double gpu_kmeans_image_colors(const unsigned char *data, int n_pixels,
     free(h_pixels);
   });
 
-  int blocks_for_inertia =
-      (n_pixels + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-  CUDA_CHECK_MALLOC(d_partial_inertia, blocks_for_inertia * sizeof(double), {
+  int blocks = (n_pixels + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+  CUDA_CHECK_MALLOC(d_partial_inertia, blocks * sizeof(double), {
     cudaFree(d_pixels);
     cudaFree(d_centroids);
     cudaFree(d_new_centroids);
@@ -407,7 +415,6 @@ double gpu_kmeans_image_colors(const unsigned char *data, int n_pixels,
                      h_pixels);
 
   // Setup kernel launch parameters
-  int blocks = (n_pixels + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
   int centroid_blocks = (n_colors + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
 
   // Determine if we can use shared memory for centroids
@@ -488,19 +495,17 @@ double gpu_kmeans_image_colors(const unsigned char *data, int n_pixels,
   cudaDeviceSynchronize();
 
   // Calculate inertia
-  calculate_inertia_kernel<<<blocks_for_inertia, THREADS_PER_BLOCK>>>(
+  calculate_inertia_kernel<<<blocks, THREADS_PER_BLOCK>>>(
       d_pixels, n_pixels, n_channels, d_centroids, d_labels, d_partial_inertia);
   cudaDeviceSynchronize();
 
   // Reduce partial inertia on host
-  double *h_partial_inertia =
-      (double *)malloc(blocks_for_inertia * sizeof(double));
+  double *h_partial_inertia = (double *)malloc(blocks * sizeof(double));
   CHECK(cudaMemcpy(h_partial_inertia, d_partial_inertia,
-                   blocks_for_inertia * sizeof(double),
-                   cudaMemcpyDeviceToHost));
+                   blocks * sizeof(double), cudaMemcpyDeviceToHost));
 
   double total_inertia = 0.0;
-  for (int i = 0; i < blocks_for_inertia; i++) {
+  for (int i = 0; i < blocks; i++) {
     total_inertia += h_partial_inertia[i];
   }
   total_inertia /= n_pixels;
