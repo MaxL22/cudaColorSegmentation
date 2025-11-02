@@ -1,6 +1,7 @@
 # Compiler setup
 CC      := gcc
-NVCC    := nvcc
+CCs     := 86
+NVCC    := nvcc -arch=sm_$(CCs)
 CFLAGS  := -Iinclude -O2
 NVFLAGS := -Iinclude -O2
 LDFLAGS := -lcuda -lcudart
