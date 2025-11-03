@@ -46,7 +46,7 @@ This tool performs K-means clustering on image pixels to segment images by domin
 
 ## Building the Project
 
-Just `make` it, and `make clean` removes the created directories.
+Just `make` it, and `make clean` removes the created directories. The default CC is set to 8.6, adjust it at the start of `Makefile` if needed.
 
 ## Usage
 
