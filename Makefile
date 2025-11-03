@@ -3,7 +3,7 @@ CC      := gcc
 CCs     := 86
 NVCC    := nvcc -arch=sm_$(CCs)
 CFLAGS  := -Iinclude -O2
-NVFLAGS := -Iinclude -O2
+NVFLAGS := -Iinclude -O3 -lineinfo
 LDFLAGS := -lcuda -lcudart
 
 # Project structure

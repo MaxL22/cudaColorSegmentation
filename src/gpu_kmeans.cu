@@ -124,11 +124,10 @@ __global__ void assign_clusters_shared_kernel(const float *pixels, int n_pixels,
 }
 
 /**
- * compute_new_centroids_kernel: kernel to compute sum and count for each
- * cluster
+ * compute_new_centroids_kernel: compute sum and count for each cluster
  * @pixels: Device array of shape (n_pixels * n_channels) containing pixel data
  * @n_pixels: Total number of pixels
- * @n_channels: Number of channels per pixel
+ * @n_channels: Number of channels per pixel (max 4)
  * @labels: Device array of shape (n_pixels) with cluster assignments
  * @n_colors: Number of clusters
  * @cluster_sums: Output device array of shape (n_colors * n_channels) for sum
@@ -141,19 +140,71 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
                                              int n_colors, float *cluster_sums,
                                              int *cluster_counts) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= n_pixels)
-    return;
 
-  int cluster = labels[idx];
+  // Load pixel data and cluster assignment
+  int cluster = -1;
+  float pixel_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-// Atomically add to cluster sums and counts
+  if (idx < n_pixels) {
+    cluster = labels[idx];
+    int base = idx * n_channels;
 #pragma unroll
-  for (int c = 0; c < 4; c++) {
-    if (c < n_channels)
-      atomicAdd(&cluster_sums[cluster * n_channels + c],
-                pixels[idx * n_channels + c]);
+    for (int c = 0; c < 4; c++) {
+      if (c < n_channels) {
+        pixel_data[c] = pixels[base + c];
+      }
+    }
   }
-  atomicAdd(&cluster_counts[cluster], 1);
+
+  // Warp-level aggregation
+  const int warp_id = threadIdx.x / 32;
+  const int lane_id = threadIdx.x % 32;
+
+  // Process each cluster that appears in this warp
+  for (int target_cluster = 0; target_cluster < n_colors; target_cluster++) {
+    // Check which threads in warp have this cluster
+    unsigned mask = __ballot_sync(0xFFFFFFFF, cluster == target_cluster);
+
+    if (mask == 0)
+      continue; // No threads in this warp have this cluster
+
+    // Aggregate within warp using shuffle operations
+    float warp_sums[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    int warp_count = 0;
+
+    if (cluster == target_cluster) {
+#pragma unroll
+      for (int c = 0; c < 4; c++) {
+        warp_sums[c] = pixel_data[c];
+      }
+      warp_count = 1;
+    }
+
+// Reduce across warp, sum up values from all lanes with this cluster
+#pragma unroll
+    for (int offset = 16; offset > 0; offset /= 2) {
+#pragma unroll
+      for (int c = 0; c < 4; c++) {
+        warp_sums[c] += __shfl_down_sync(mask, warp_sums[c], offset);
+      }
+      warp_count += __shfl_down_sync(mask, warp_count, offset);
+    }
+
+    // Only lane 0 (or first active lane) does the atomic operation
+    int first_lane = __ffs(mask) - 1;
+    if (lane_id == first_lane) {
+      int base_cluster = target_cluster * n_channels;
+#pragma unroll
+      for (int c = 0; c < 4; c++) {
+        if (c < n_channels && warp_sums[c] != 0.0f) {
+          atomicAdd(&cluster_sums[base_cluster + c], warp_sums[c]);
+        }
+      }
+      if (warp_count > 0) {
+        atomicAdd(&cluster_counts[target_cluster], warp_count);
+      }
+    }
+  }
 }
 
 /**
