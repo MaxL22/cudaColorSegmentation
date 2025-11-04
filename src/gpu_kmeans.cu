@@ -145,6 +145,7 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
   int cluster = -1;
   float pixel_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
+  // Load data
   if (idx < n_pixels) {
     cluster = labels[idx];
     int base = idx * n_channels;
@@ -156,11 +157,11 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
     }
   }
 
-  // Warp-level aggregation
+  // Warp-level aggregation, get thread id inside the warp
   const int warp_id = threadIdx.x / 32;
   const int lane_id = threadIdx.x % 32;
 
-  // Process each cluster that appears in this warp
+  // For each cluster that appears in this warp
   for (int target_cluster = 0; target_cluster < n_colors; target_cluster++) {
     // Check which threads in warp have this cluster
     unsigned mask = __ballot_sync(0xFFFFFFFF, cluster == target_cluster);
@@ -168,7 +169,7 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
     if (mask == 0)
       continue; // No threads in this warp have this cluster
 
-    // Aggregate within warp using shuffle operations
+    // Aggregate within warp
     float warp_sums[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int warp_count = 0;
 
@@ -185,12 +186,16 @@ __global__ void compute_new_centroids_kernel(const float *pixels, int n_pixels,
     for (int offset = 16; offset > 0; offset /= 2) {
 #pragma unroll
       for (int c = 0; c < 4; c++) {
+        // __shfl_down_sync(mask, value, delta) copies from a lane with higher ID,
+        // this is doing a warp-level reduction
+        // Taken from https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
         warp_sums[c] += __shfl_down_sync(mask, warp_sums[c], offset);
       }
       warp_count += __shfl_down_sync(mask, warp_count, offset);
     }
 
-    // Only lane 0 (or first active lane) does the atomic operation
+    // Only first active lane does the atomic operation
+    // gets the position of the least significant bit set
     int first_lane = __ffs(mask) - 1;
     if (lane_id == first_lane) {
       int base_cluster = target_cluster * n_channels;
@@ -309,7 +314,7 @@ __global__ void calculate_inertia_kernel(const float *pixels, int n_pixels,
  * initial centroids
  * @h_pixels: Host array of pixel data (for random sampling)
  *
- * It's not slow per se, it's probably faster to keep the CPU version
+ * It's not slow per se, it's *probably* faster to keep the CPU version
  */
 void kmeans_pp_init_gpu(const float *d_pixels, int n_pixels, int n_channels,
                         int n_colors, float *d_centroids,
